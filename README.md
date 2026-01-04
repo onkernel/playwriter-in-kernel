@@ -47,7 +47,8 @@ export CURSOR_API_KEY="your-cursor-api-key"
 | Flag | Description | Default |
 |------|-------------|---------|
 | `-p` | Prompt to send to cursor-agent (required) | |
-| `-session` | Reuse an existing browser session ID | |
+| `-s` | Reuse an existing browser session ID | |
+| `-m` | Model to use (e.g., `opus-4.5`, `sonnet-4`, `gpt-5`) | `opus-4.5` |
 | `-timeout-seconds` | Browser session timeout | 600 |
 | `-agent-timeout` | Hard timeout for cursor-agent (0 = no limit) | 0 |
 | `-d` | Delete browser session on exit | false |
@@ -59,7 +60,7 @@ export CURSOR_API_KEY="your-cursor-api-key"
 ./playwriter-in-kernel -p "use playwriter to navigate to news.ycombinator.com and tell me the top 3 stories"
 
 # Reuse an existing session (faster for multiple prompts)
-./playwriter-in-kernel -session abc123xyz -p "click the first link"
+./playwriter-in-kernel -s abc123xyz -p "click the first link"
 
 # Auto-cleanup after running
 ./playwriter-in-kernel -d -p "take a screenshot of example.com"
@@ -105,10 +106,10 @@ When you run without `-d`, the browser session stays alive. You can reuse it for
 ```bash
 # First run - note the session ID in the output
 ./playwriter-in-kernel -p "navigate to github.com"
-# Output: Reuse session: playwriter-in-kernel -session abc123xyz -p "..."
+# Output: Reuse session: playwriter-in-kernel -s abc123xyz -p "..."
 
 # Subsequent runs - skip setup, go straight to the prompt
-./playwriter-in-kernel -session abc123xyz -p "click on Explore"
+./playwriter-in-kernel -s abc123xyz -p "click on Explore"
 ```
 
 ## Links

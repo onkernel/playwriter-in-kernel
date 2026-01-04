@@ -150,7 +150,7 @@ func setupBrowser(ctx context.Context, client kernel.Client, timeoutSeconds int6
 	fmt.Println(successStyle.Render("Browser created: ") + sessionID)
 	fmt.Println(dimStyle.Render("Live view: ") + liveViewURL)
 	if showReuseHint {
-		fmt.Println(dimStyle.Render("Reuse session: ") + "playwriter-in-kernel -session " + sessionID + " -p \"...\"")
+		fmt.Println(dimStyle.Render("Reuse session: ") + "playwriter-in-kernel -s " + sessionID + " -p \"...\"")
 	}
 
 	// Wait for browser to initialize
@@ -300,20 +300,38 @@ func processStreamLine(line string) {
 	}
 }
 
+// isPlaywriterConnected checks if the Playwriter extension is already connected
+// by looking for an ESTABLISHED connection to port 19988 (the Playwriter relay)
+func isPlaywriterConnected(ctx context.Context, client kernel.Client, sessionID string) bool {
+	result, err := client.Browsers.Process.Exec(ctx, sessionID, kernel.BrowserProcessExecParams{
+		Command:    "bash",
+		Args:       []string{"-c", "netstat -tn 2>/dev/null | grep -q ':19988.*ESTABLISHED' && echo connected"},
+		TimeoutSec: kernel.Opt(int64(5)),
+	})
+	if err != nil {
+		return false
+	}
+	return strings.Contains(decodeB64(result.StdoutB64), "connected")
+}
+
 // runCursorAgent executes cursor-agent with the given prompt
-func runCursorAgent(ctx context.Context, client kernel.Client, sessionID, apiKey, prompt string, timeout int64) (int64, error) {
+func runCursorAgent(ctx context.Context, client kernel.Client, sessionID, apiKey, prompt, model string, timeout int64) (int64, error) {
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 		defer cancel()
 	}
 
-	// Click extension to activate Playwriter
-	fmt.Println(headerStyle.Render("Activating Playwriter extension..."))
-	client.Browsers.Computer.ClickMouse(ctx, sessionID, kernel.BrowserComputerClickMouseParams{
-		X: extensionIconX, Y: extensionIconY,
-	})
-	time.Sleep(2 * time.Second)
+	// Check if Playwriter is already connected, if not click to activate
+	if isPlaywriterConnected(ctx, client, sessionID) {
+		fmt.Println(dimStyle.Render("Playwriter extension already connected"))
+	} else {
+		fmt.Println(headerStyle.Render("Activating Playwriter extension..."))
+		client.Browsers.Computer.ClickMouse(ctx, sessionID, kernel.BrowserComputerClickMouseParams{
+			X: extensionIconX, Y: extensionIconY,
+		})
+		time.Sleep(2 * time.Second)
+	}
 
 	fmt.Println(headerStyle.Render("Running cursor-agent..."))
 	fmt.Println()
@@ -325,9 +343,13 @@ func runCursorAgent(ctx context.Context, client kernel.Client, sessionID, apiKey
 	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
 
 	// cursor-agent requires a PTY to produce output, so we use 'script' to allocate one
+	modelArg := ""
+	if model != "" {
+		modelArg = fmt.Sprintf(" --model %s", model)
+	}
 	cmd := fmt.Sprintf(
-		`export HOME=/home/kernel && export PATH="$HOME/.local/bin:$PATH" && export CURSOR_API_KEY='%s' && script -q -c "cursor-agent -f --approve-mcps --output-format stream-json -p \"%s\"" /dev/null`,
-		apiKey, escaped,
+		`export HOME=/home/kernel && export PATH="$HOME/.local/bin:$PATH" && export CURSOR_API_KEY='%s' && script -q -c "cursor-agent -f --approve-mcps --output-format stream-json%s -p \"%s\"" /dev/null`,
+		apiKey, modelArg, escaped,
 	)
 
 	spawn, err := client.Browsers.Process.Spawn(ctx, sessionID, kernel.BrowserProcessSpawnParams{
@@ -378,9 +400,10 @@ func runCursorAgent(ctx context.Context, client kernel.Client, sessionID, apiKey
 
 func main() {
 	prompt := flag.String("p", "", "Prompt to send to cursor-agent (required)")
-	session := flag.String("session", "", "Reuse an existing browser session ID")
+	session := flag.String("s", "", "Reuse an existing browser session ID")
 	timeout := flag.Int64("timeout-seconds", 600, "Browser session timeout in seconds")
 	agentTimeout := flag.Int64("agent-timeout", 0, "Hard timeout for cursor-agent in seconds (0 = no limit)")
+	model := flag.String("m", "opus-4.5", "Model to use (e.g., opus-4.5, sonnet-4, gpt-5)")
 	deleteBrowser := flag.Bool("d", false, "Delete browser session on exit")
 	flag.Parse()
 
@@ -389,7 +412,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Options:")
 		fmt.Fprintln(os.Stderr, "  -p string           Prompt to send to cursor-agent (required)")
-		fmt.Fprintln(os.Stderr, "  -session string     Reuse an existing browser session ID")
+		fmt.Fprintln(os.Stderr, "  -s string           Reuse an existing browser session ID")
+		fmt.Fprintln(os.Stderr, "  -m string           Model to use (default: opus-4.5)")
 		fmt.Fprintln(os.Stderr, "  -timeout-seconds    Browser session timeout (default: 600)")
 		fmt.Fprintln(os.Stderr, "  -agent-timeout      Hard timeout for cursor-agent (default: 0 = no limit)")
 		fmt.Fprintln(os.Stderr, "  -d                  Delete browser session on exit")
@@ -421,8 +445,14 @@ func main() {
 
 	if *session != "" {
 		sessionID = *session
-		fmt.Println(dimStyle.Render("Using existing session: " + sessionID))
-		fmt.Println()
+		// Get browser info to display live view URL
+		browser, err := client.Browsers.Get(ctx, sessionID)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, errorStyle.Render("Failed to get session: "+err.Error()))
+			os.Exit(1)
+		}
+		fmt.Println(dimStyle.Render("Using session: ") + sessionID)
+		fmt.Println(dimStyle.Render("Live view: ") + browser.BrowserLiveViewURL)
 	} else {
 		sessionID, liveViewURL, err = setupBrowser(ctx, client, *timeout, !*deleteBrowser)
 		if err != nil {
@@ -445,7 +475,7 @@ func main() {
 		}()
 	}
 
-	exitCode, err := runCursorAgent(ctx, client, sessionID, cursorKey, *prompt, *agentTimeout)
+	exitCode, err := runCursorAgent(ctx, client, sessionID, cursorKey, *prompt, *model, *agentTimeout)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, errorStyle.Render(err.Error()))
 		os.Exit(1)
