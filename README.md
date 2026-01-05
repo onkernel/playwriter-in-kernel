@@ -1,31 +1,35 @@
 # playwriter-in-kernel
 
-Run [Playwriter](https://github.com/anthropics/playwriter) browser automation tasks via `cursor-agent` inside a [Kernel](https://onkernel.com) cloud browser.
+Run [Playwriter](https://github.com/remorses/playwriter) browser automation tasks via AI coding agents inside a [Kernel](https://onkernel.com) cloud browser.
 
-This tool creates a Kernel browser session with the Playwriter Chrome extension, installs Cursor, and executes prompts that can control the browser using natural language.
+This tool creates a Kernel browser session with the Playwriter Chrome extension, installs an AI coding agent (Cursor or Claude Code), builds Playwriter from source, and executes prompts that can control the browser using natural language.
 
 ## Prerequisites
 
 - **Go 1.22+**
 - **Kernel API Key** - Get from [Kernel Dashboard](https://dashboard.onkernel.com)
-- **Cursor API Key** - From your Cursor subscription
+- **Agent API Key**:
+  - For Cursor: `CURSOR_API_KEY` from your Cursor subscription
+  - For Claude: `ANTHROPIC_API_KEY` from Anthropic
 - **Playwriter extension** uploaded to Kernel (one-time setup, see below)
 
 ## One-Time Setup
 
-Upload the Playwriter extension to your Kernel account:
+Upload the Playwriter Chrome extension to your Kernel account:
 
 ```bash
 # Install Kernel CLI if needed
 brew install onkernel/tap/kernel
 
-# Download and upload the extension
+# Download the Chrome extension and upload to Kernel
 kernel extensions download-web-store \
   "https://chromewebstore.google.com/detail/playwriter-mcp/jfeammnjpkecdekppnclgkkffahnhfhe" \
   --to ./playwriter-ext
 
 kernel extensions upload ./playwriter-ext --name playwriter
 ```
+
+> **Note**: Playwriter has two components: a Chrome extension (uploaded above) and a relay/MCP server. The Chrome extension is from the Web Store, but the relay is built from source during setup because the npm package is outdated.
 
 ## Installation
 
@@ -37,83 +41,131 @@ go build -o playwriter-in-kernel .
 
 ```bash
 export KERNEL_API_KEY="your-kernel-api-key"
-export CURSOR_API_KEY="your-cursor-api-key"
+export CURSOR_API_KEY="your-cursor-api-key"      # For cursor agent
+export ANTHROPIC_API_KEY="your-anthropic-api-key" # For claude agent
 
-./playwriter-in-kernel -p "use playwriter to search google for the weather in NYC"
+# Using Cursor
+./playwriter-in-kernel -agent cursor -p "use duckduckgo to find the latest news in NYC"
+
+# Using Claude Code
+./playwriter-in-kernel -agent claude -p "use playwriter to navigate to example.com"
 ```
 
 ### Options
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `-p` | Prompt to send to cursor-agent (required) | |
-| `-s` | Reuse an existing browser session ID | |
-| `-m` | Model to use (e.g., `opus-4.5`, `sonnet-4`, `gpt-5`) | `opus-4.5` |
-| `-timeout-seconds` | Browser session timeout | 600 |
-| `-agent-timeout` | Hard timeout for cursor-agent (0 = no limit) | 0 |
-| `-d` | Delete browser session on exit | false |
+| Flag               | Description                                   | Default    |
+| ------------------ | --------------------------------------------- | ---------- |
+| `-p`               | Prompt to send to the agent (required)        |            |
+| `-agent`           | Agent to use: `cursor` or `claude` (required) |            |
+| `-s`               | Reuse an existing browser session ID          |            |
+| `-m`               | Model to use                                  | `opus-4.5` |
+| `-timeout-seconds` | Browser session timeout                       | 600        |
+| `-agent-timeout`   | Hard timeout for agent (0 = no limit)         | 0          |
+| `-d`               | Delete browser session on exit                | false      |
 
 ### Examples
 
 ```bash
-# Basic usage - creates a new browser, runs the task
-./playwriter-in-kernel -p "use playwriter to navigate to news.ycombinator.com and tell me the top 3 stories"
+# Basic usage with Cursor
+./playwriter-in-kernel -agent cursor -p "use playwriter to navigate to news.ycombinator.com and summarize the top 3 stories"
+
+# Use Claude Code instead
+./playwriter-in-kernel -agent claude -p "use playwriter to navigate to example.com and describe what you see"
 
 # Reuse an existing session (faster for multiple prompts)
-./playwriter-in-kernel -s abc123xyz -p "click the first link"
+./playwriter-in-kernel -agent cursor -s f9v6br0tme7epagxtdss952x -p "click the first link"
 
 # Auto-cleanup after running
-./playwriter-in-kernel -d -p "take a screenshot of example.com"
+./playwriter-in-kernel -agent cursor -d -p "navigate to example.com and tell me what the page says"
 
 # Set a timeout to prevent hanging
 ./playwriter-in-kernel -agent-timeout 120 -p "search for recent news"
+
+# Longer browser timeout for debugging (30 minutes)
+./playwriter-in-kernel -timeout-seconds 1800 -p "explore the website"
 ```
 
 ## How It Works
 
 1. **Creates a Kernel browser** with the Playwriter extension pre-loaded
 2. **Pins the extension** to the Chrome toolbar
-3. **Installs Cursor** and configures it with the Playwriter MCP server
-4. **Activates Playwriter** by clicking the extension icon
-5. **Runs cursor-agent** with your prompt, streaming output in real-time
-6. **Displays results** including tool calls and assistant responses
+3. **Installs the agent** (Cursor or Claude Code)
+4. **Builds Playwriter from source** with the extension allowlist disabled
+5. **Starts the Playwriter relay** server
+6. **Configures MCP** to use the locally built Playwriter
+7. **Activates Playwriter** by clicking the extension icon
+8. **Runs the agent** with your prompt, streaming output in real-time
+9. **Displays results** including tool calls and assistant responses
 
-### Technical Notes
+## Architecture
 
-- **PTY Requirement**: `cursor-agent` requires a pseudo-terminal to produce output. The tool uses `script -q -c ... /dev/null` to allocate one.
-- **HOME Environment**: Kernel's process exec defaults to `HOME=/`. The tool explicitly sets `HOME=/home/kernel` for all commands.
-- **Extension ID**: The Chrome internal extension ID (`hnenofdplkoaanpegekhdmbpckgdecba`) differs from the Web Store ID.
+The codebase uses an agent-agnostic interface so both Cursor and Claude follow the same setup flow:
 
-## MCP Configuration
-
-The tool creates this configuration at `~/.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "playwriter": {
-      "command": "npx",
-      "args": ["playwriter@latest"]
-    }
-  }
-}
 ```
+.
+├── main.go           # CLI entrypoint and orchestration
+├── agent/
+│   ├── agent.go      # Agent interface and shared utilities
+│   ├── cursor.go     # Cursor-agent implementation
+│   └── claude.go     # Claude Code implementation
+├── browser/
+│   └── setup.go      # Browser setup, Playwriter install, and activation
+└── stream/
+    └── parser.go     # Output stream parsing and display
+```
+
+### Agent Interface
+
+Both agents implement the Agent interface:
+
+- Name() - Returns "cursor" or "claude"
+- Install() - Installs the agent CLI
+- ConfigureMCP() - Sets up MCP server configuration
+- Run() - Executes a prompt and streams output
+- RequiredEnvVar() - Returns the API key env var name
+- DefaultModel() - Returns the default model
+
+### Playwriter Components
+
+Playwriter has two parts:
+
+1. **Chrome Extension** (from Web Store): Injected into the browser, captures CDP commands. You upload this to Kernel once during setup.
+
+2. **Relay/MCP Server** (built from source): Bridges between the AI agent and the Chrome extension. Built automatically during each session setup because the npm package is outdated.
+
+The relay build process:
+
+1. Clone playwriter from GitHub (latest main branch)
+2. Patch the relay to disable extension ID validation (it has a hardcoded allowlist that doesn't include the uploaded extension's ID)
+3. Install dependencies with pnpm (required for workspace dependencies), run build (uses bun internally)
+4. Start the relay server on port 19988
+5. Configure MCP to use the locally built server
+
+## Technical Notes
+
+- **PTY Requirement**: Both agents require a pseudo-terminal for output. The tool uses `script -q` to allocate one.
+- **HOME Environment**: Kernel's process exec defaults to `HOME=/`. The tool explicitly sets `HOME=/home/kernel`.
+- **Extension ID**: The Chrome extension ID (`hnenofdplkoaanpegekhdmbpckgdecba`) is derived from the extension's public key and is consistent across all Kernel users.
+- **Extension allowlist**: The Playwriter relay has a hardcoded allowlist of known extension IDs. The extension ID when uploaded to Kernel isn't in this list, so we patch the relay to disable validation.
+- **Claude as kernel user**: Claude Code refuses `--dangerously-skip-permissions` as root, so we use `su - kernel`.
+- **Build from source**: The npm package is outdated, so we build the relay from source to get the `/extension` websocket endpoint.
 
 ## Session Reuse
 
-When you run without `-d`, the browser session stays alive. You can reuse it for faster subsequent runs:
+When you run without -d, the browser session stays alive. You can reuse it for faster subsequent runs:
 
 ```bash
 # First run - note the session ID in the output
-./playwriter-in-kernel -p "navigate to github.com"
-# Output: Reuse session: playwriter-in-kernel -s abc123xyz -p "..."
+./playwriter-in-kernel -agent cursor -p "navigate to github.com"
+# Output: Reuse: playwriter-in-kernel -agent cursor -s f9v6br0tme7epagxtdss952x -p "..."
 
 # Subsequent runs - skip setup, go straight to the prompt
-./playwriter-in-kernel -s abc123xyz -p "click on Explore"
+./playwriter-in-kernel -agent cursor -s f9v6br0tme7epagxtdss952x -p "click on Explore"
 ```
 
 ## Links
 
-- [Playwriter](https://github.com/anthropics/playwriter) - Browser automation MCP server
+- [Playwriter](https://github.com/remorses/playwriter) - Browser automation extension and MCP server
 - [Kernel](https://onkernel.com) - Cloud browser infrastructure
-- [Cursor](https://cursor.com) - AI-powered code editor
+- [Cursor CLI](https://cursor.com/cli)
+- [Claude Code](https://code.claude.com/docs/en/overview)

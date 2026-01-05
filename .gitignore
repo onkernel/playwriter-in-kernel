@@ -3,3 +3,6 @@ playwriter-in-kernel
 
 # Downloaded extension bundle
 playwriter-ext/
+
+# macOS
+.DS_Store
