@@ -32,8 +32,10 @@ func getAgent(name string) (agent.Agent, error) {
 		return agent.NewCursorAgent(), nil
 	case "claude":
 		return agent.NewClaudeAgent(), nil
+	case "opencode":
+		return agent.NewOpenCodeAgent(), nil
 	default:
-		return nil, fmt.Errorf("unknown agent: %s (supported: cursor, claude)", name)
+		return nil, fmt.Errorf("unknown agent: %s (supported: cursor, claude, opencode)", name)
 	}
 }
 
@@ -48,10 +50,10 @@ func main() {
 	flag.Parse()
 
 	if *prompt == "" || *agentName == "" {
-		fmt.Fprintln(os.Stderr, "Usage: playwriter-in-kernel -agent <cursor|claude> -p \"your prompt\" [options]")
+		fmt.Fprintln(os.Stderr, "Usage: playwriter-in-kernel -agent <cursor|claude|opencode> -p \"your prompt\" [options]")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Options:")
-		fmt.Fprintln(os.Stderr, "  -agent string       Agent to use: cursor or claude (required)")
+		fmt.Fprintln(os.Stderr, "  -agent string       Agent to use: cursor, claude, or opencode (required)")
 		fmt.Fprintln(os.Stderr, "  -p string           Prompt to send to the agent (required)")
 		fmt.Fprintln(os.Stderr, "  -s string           Reuse an existing browser session ID")
 		fmt.Fprintln(os.Stderr, "  -m string           Model to use (default depends on agent)")
@@ -75,15 +77,35 @@ func main() {
 
 	// Check environment variables
 	kernelKey := os.Getenv("KERNEL_API_KEY")
-	agentAPIKey := os.Getenv(ag.RequiredEnvVar())
-
 	if kernelKey == "" {
 		fmt.Fprintln(os.Stderr, errorStyle.Render("KERNEL_API_KEY environment variable is required"))
 		os.Exit(1)
 	}
-	if agentAPIKey == "" {
-		fmt.Fprintln(os.Stderr, errorStyle.Render(ag.RequiredEnvVar()+" environment variable is required"))
-		os.Exit(1)
+
+	// Collect API key(s) for the agent
+	var agentAPIKey string
+	var providerEnvVars map[string]string
+
+	if requiredEnv := ag.RequiredEnvVar(); requiredEnv != "" {
+		// Agent requires a single specific env var
+		agentAPIKey = os.Getenv(requiredEnv)
+		if agentAPIKey == "" {
+			fmt.Fprintln(os.Stderr, errorStyle.Render(requiredEnv+" environment variable is required"))
+			os.Exit(1)
+		}
+	} else if envVars := ag.ProviderEnvVars(); len(envVars) > 0 {
+		// Agent supports multiple providers - collect all available env vars
+		providerEnvVars = make(map[string]string)
+		for _, envVar := range envVars {
+			if val := os.Getenv(envVar); val != "" {
+				providerEnvVars[envVar] = val
+			}
+		}
+		if len(providerEnvVars) == 0 {
+			fmt.Fprintln(os.Stderr, errorStyle.Render("At least one provider API key is required for "+ag.Name()))
+			fmt.Fprintln(os.Stderr, dimStyle.Render("Supported: "+strings.Join(envVars, ", ")))
+			os.Exit(1)
+		}
 	}
 
 	// Set default model if not specified
@@ -178,6 +200,7 @@ func main() {
 		Prompt:       *prompt,
 		Model:        modelToUse,
 		APIKey:       agentAPIKey,
+		EnvVars:      providerEnvVars,
 		AgentTimeout: *agentTimeout,
 	}, func(event agent.StreamEvent) {
 		parser.ProcessEvent(event)

@@ -33,6 +33,11 @@ func (a *ClaudeAgent) DefaultModel() string {
 	return "opus-4.5"
 }
 
+// ProviderEnvVars returns nil since Claude only needs ANTHROPIC_API_KEY
+func (a *ClaudeAgent) ProviderEnvVars() []string {
+	return nil
+}
+
 // Install installs Claude Code in the browser environment
 func (a *ClaudeAgent) Install(ctx context.Context, client kernel.Client, sessionID string) error {
 	fmt.Println(HeaderStyle.Render("Installing Claude Code..."))

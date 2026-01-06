@@ -2,7 +2,7 @@
 
 Run [Playwriter](https://github.com/remorses/playwriter) browser automation tasks via AI coding agents inside a [Kernel](https://onkernel.com) cloud browser.
 
-This tool creates a Kernel browser session with the Playwriter Chrome extension, installs an AI coding agent (Cursor or Claude Code), builds Playwriter from source, and executes prompts that can control the browser using natural language.
+This tool creates a Kernel browser session with the Playwriter Chrome extension, installs an AI coding agent (Cursor, Claude Code, or OpenCode), builds Playwriter from source, and executes prompts that can control the browser using natural language.
 
 ## Prerequisites
 
@@ -11,6 +11,7 @@ This tool creates a Kernel browser session with the Playwriter Chrome extension,
 - **Agent API Key**:
   - For Cursor: `CURSOR_API_KEY` from your Cursor subscription
   - For Claude: `ANTHROPIC_API_KEY` from Anthropic
+  - For OpenCode: `ANTHROPIC_API_KEY` from Anthropic (or configure other providers via opencode auth)
 - **Playwriter extension** uploaded to Kernel (one-time setup, see below)
 
 ## One-Time Setup
@@ -42,13 +43,16 @@ go build -o playwriter-in-kernel .
 ```bash
 export KERNEL_API_KEY="your-kernel-api-key"
 export CURSOR_API_KEY="your-cursor-api-key"      # For cursor agent
-export ANTHROPIC_API_KEY="your-anthropic-api-key" # For claude agent
+export ANTHROPIC_API_KEY="your-anthropic-api-key" # For claude or opencode agent
 
 # Using Cursor
 ./playwriter-in-kernel -agent cursor -p "use duckduckgo to find the latest news in NYC"
 
 # Using Claude Code
 ./playwriter-in-kernel -agent claude -p "use playwriter to navigate to example.com"
+
+# Using OpenCode
+./playwriter-in-kernel -agent opencode -p "use playwriter to navigate to example.com and tell me the page title"
 ```
 
 ### Options
@@ -56,7 +60,7 @@ export ANTHROPIC_API_KEY="your-anthropic-api-key" # For claude agent
 | Flag               | Description                                   | Default    |
 | ------------------ | --------------------------------------------- | ---------- |
 | `-p`               | Prompt to send to the agent (required)        |            |
-| `-agent`           | Agent to use: `cursor` or `claude` (required) |            |
+| `-agent`           | Agent to use: `cursor`, `claude`, or `opencode` (required) |            |
 | `-s`               | Reuse an existing browser session ID          |            |
 | `-m`               | Model to use                                  | `opus-4.5` |
 | `-timeout-seconds` | Browser session timeout                       | 600        |
@@ -99,7 +103,7 @@ export ANTHROPIC_API_KEY="your-anthropic-api-key" # For claude agent
 
 ## Architecture
 
-The codebase uses an agent-agnostic interface so both Cursor and Claude follow the same setup flow:
+The codebase uses an agent-agnostic interface so Cursor, Claude, and OpenCode all follow the same setup flow:
 
 ```
 .
@@ -107,7 +111,8 @@ The codebase uses an agent-agnostic interface so both Cursor and Claude follow t
 ├── agent/
 │   ├── agent.go      # Agent interface and shared utilities
 │   ├── cursor.go     # Cursor-agent implementation
-│   └── claude.go     # Claude Code implementation
+│   ├── claude.go     # Claude Code implementation
+│   └── opencode.go   # OpenCode implementation
 ├── browser/
 │   └── setup.go      # Browser setup, Playwriter install, and activation
 └── stream/
@@ -116,9 +121,9 @@ The codebase uses an agent-agnostic interface so both Cursor and Claude follow t
 
 ### Agent Interface
 
-Both agents implement the Agent interface:
+All agents implement the Agent interface:
 
-- Name() - Returns "cursor" or "claude"
+- Name() - Returns "cursor", "claude", or "opencode"
 - Install() - Installs the agent CLI
 - ConfigureMCP() - Sets up MCP server configuration
 - Run() - Executes a prompt and streams output
@@ -143,7 +148,7 @@ The relay build process:
 
 ## Technical Notes
 
-- **PTY Requirement**: Both agents require a pseudo-terminal for output. The tool uses `script -q` to allocate one.
+- **PTY Requirement**: All agents require a pseudo-terminal for output. The tool uses `script -q` to allocate one.
 - **HOME Environment**: Kernel's process exec defaults to `HOME=/`. The tool explicitly sets `HOME=/home/kernel`.
 - **Extension ID**: The Chrome extension ID (`hnenofdplkoaanpegekhdmbpckgdecba`) is derived from the extension's public key and is consistent across all Kernel users.
 - **Extension allowlist**: The Playwriter relay has a hardcoded allowlist of known extension IDs. The extension ID when uploaded to Kernel isn't in this list, so we patch the relay to disable validation.
@@ -169,3 +174,4 @@ When you run without -d, the browser session stays alive. You can reuse it for f
 - [Kernel](https://onkernel.com) - Cloud browser infrastructure
 - [Cursor CLI](https://cursor.com/cli)
 - [Claude Code](https://code.claude.com/docs/en/overview)
+- [OpenCode](https://opencode.ai) - Open source AI coding agent

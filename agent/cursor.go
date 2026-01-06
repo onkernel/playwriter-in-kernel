@@ -33,6 +33,11 @@ func (a *CursorAgent) DefaultModel() string {
 	return "opus-4.5"
 }
 
+// ProviderEnvVars returns nil since Cursor only needs CURSOR_API_KEY
+func (a *CursorAgent) ProviderEnvVars() []string {
+	return nil
+}
+
 // Install installs cursor-agent in the browser environment
 func (a *CursorAgent) Install(ctx context.Context, client kernel.Client, sessionID string) error {
 	fmt.Println(HeaderStyle.Render("Installing Cursor..."))

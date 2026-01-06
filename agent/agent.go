@@ -44,8 +44,9 @@ func PlaywriterMCPConfig() MCPConfig {
 type RunOptions struct {
 	Prompt       string
 	Model        string
-	APIKey       string
-	AgentTimeout int64 // Hard timeout in seconds (0 = no limit)
+	APIKey       string            // Primary API key (for agents with single provider)
+	EnvVars      map[string]string // Additional env vars to forward (for multi-provider agents)
+	AgentTimeout int64             // Hard timeout in seconds (0 = no limit)
 }
 
 // StreamHandler is called for each event from the agent's output stream
@@ -76,7 +77,7 @@ type StreamEvent struct {
 
 // Agent represents an AI coding agent that can run prompts with MCP tools
 type Agent interface {
-	// Name returns the agent identifier (e.g., "cursor", "claude")
+	// Name returns the agent identifier (e.g., "cursor", "claude", "opencode")
 	Name() string
 
 	// Install installs the agent CLI in the browser environment
@@ -89,8 +90,14 @@ type Agent interface {
 	// The handler is called for each event in the output stream
 	Run(ctx context.Context, client kernel.Client, sessionID string, opts RunOptions, handler StreamHandler) (exitCode int64, err error)
 
-	// RequiredEnvVar returns the name of the environment variable needed for the API key
+	// RequiredEnvVar returns the name of the environment variable needed for the API key.
+	// Returns empty string if no single env var is required (e.g., multi-provider agents).
 	RequiredEnvVar() string
+
+	// ProviderEnvVars returns a list of environment variable names that should be
+	// forwarded to the agent for provider authentication. Returns nil for agents
+	// that only need a single API key (use RequiredEnvVar instead).
+	ProviderEnvVars() []string
 
 	// DefaultModel returns the default model to use if none is specified
 	DefaultModel() string

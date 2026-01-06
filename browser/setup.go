@@ -198,18 +198,16 @@ git clone --depth 1 https://github.com/remorses/playwriter.git
 		return fmt.Errorf("clone failed (exit %d): %s", result.ExitCode, decodeB64(result.StderrB64))
 	}
 
-	// Disable the extension ID allowlist check in the relay.
+	// Add the Kernel extension ID to the allowed list.
 	// The relay has a hardcoded list of allowed extension IDs, but our Kernel extension
-	// ID (hnenofdplkoaanpegekhdmbpckgdecba) isn't in that list. Rather than adding it
-	// (which would break if upstream changes the list format), we just accept all IDs.
-	// This is safe since we control the Kernel environment.
+	// ID (hnenofdplkoaanpegekhdmbpckgdecba) isn't in that list.
 	fmt.Println(dimStyle.Render("Patching extension allowlist..."))
 	result, err = proc.Exec(ctx, sessionID, kernel.BrowserProcessExecParams{
 		Command: "bash",
 		Args: []string{"-c", `
 cd /home/kernel/playwriter/playwriter
-# Replace the validateExtensionId function to always return true
-sed -i 's/return ALLOWED_EXTENSION_IDS.includes(extensionId)/return true \/\/ Kernel: accept all extension IDs/' src/cdp-relay.ts
+# Add Kernel extension ID to the allowed list
+sed -i "/elnnakgjclnapgflmidlpobefkdmapdm/a\\    '` + PlaywriterExtensionID + `', // Kernel extension" src/cdp-relay.ts
 `},
 		TimeoutSec: kernel.Opt(int64(30)),
 	})
